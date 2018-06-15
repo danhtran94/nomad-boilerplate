@@ -28,10 +28,10 @@ job "build-infra" {
             }
 
             resources {
-                cpu    = 100
-                memory = 128
+                cpu    = 500
+                memory = 256
                 network {
-                    mbits = 1000
+                    mbits = 512
 
                     port "proxy" {
                         // host port

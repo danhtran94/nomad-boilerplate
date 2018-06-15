@@ -38,6 +38,9 @@ cd /usr/local/bin/
 wget https://github.com/weaveworks/weave/releases/download/v2.3.0/weave
 cd $CURRENT
 chmod +x /usr/local/bin/weave
+
+sudo curl -L git.io/scope -o /usr/local/bin/scope
+sudo chmod a+x /usr/local/bin/scope
 # -- END Install Dependencies --
 
 # Create Directories
@@ -110,6 +113,8 @@ weave launch --ipalloc-range 10.2.0.0/16 --ipalloc-default-subnet 10.2.1.0/24 $W
 echo "DOCKER_HOST=unix:///var/run/weave/weave.sock" >> /etc/environment
 eval "$(weave env)"
 weave expose
+
+scope launch
 # -- END Connect Docker Network Mesh --
 
 # Connect DO Block Storage
