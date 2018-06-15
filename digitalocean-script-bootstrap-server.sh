@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 # Configuration
+export DO_TOKEN=5fce3866901e5b8ba58df72d7170a035d3f44ebeb9fcc100a803e7a13898b362
 export CURRENT=`pwd`
-export BOOTSTRAP=true
+export BOOTSTRAP=false
 export ETH0=$(ifconfig eth0 | grep 'inet addr' | sed -e 's/:/ /' | awk '{print $3}')
 # export ETH1=$(ifconfig eth1 | grep 'inet addr' | sed -e 's/:/ /' | awk '{print $3}')
 export CONSUL_DOMAIN="consul.abusy.life"
@@ -67,11 +68,11 @@ enable_syslog = true
 
 retry_join = ["${CONSUL_DOMAIN}"]
 
-bind_addr = "0.0.0.0"
+bind_addr = "${ETH0}"
 
 advertise_addr = "${ETH0}"
 
-client_addr = "${ETH0}"
+client_addr = "0.0.0.0"
 EOF
 # -- END Generate Nomad Server Config --
 
@@ -89,6 +90,39 @@ User=root
 ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/server
 EOF
 # -- END Generate Systemd Service File --
+
+# Start Consul Service
+systemctl start consul
+systemctl status consul
+# -- END Start Nomad Service --
+
+# Connect Docker Network Mesh
+export WEAVE_PEERS=""
+if ! $BOOTSTRAP ; then
+  while [ "$WEAVE_PEERS" == "" ]
+  do
+    echo "waiting weave peers connect ..."
+    sleep 1
+    WEAVE_PEERS=$(curl http://${CONSUL}/v1/catalog/nodes | jq --arg host "$HOSTNAME" -r '.[] | select (.Node != $host) | .Address')
+  done
+fi
+weave launch --ipalloc-range 10.2.0.0/16 --ipalloc-default-subnet 10.2.1.0/24 $WEAVE_PEERS
+echo "DOCKER_HOST=unix:///var/run/weave/weave.sock" >> /etc/environment
+eval "$(weave env)"
+weave expose
+# -- END Connect Docker Network Mesh --
+
+# Connect DO Block Storage
+docker plugin install --grant-all-permissions rexray/dobs DOBS_REGION=sgp1 DOBS_TOKEN=$DO_TOKEN
+# -- END Connect DO Block Storage --
+
+export CONSUL_PEERS=""
+while [ "$CONSUL_PEERS" == "" ]
+do
+  echo "waiting consul connect ..."
+  sleep 1
+  CONSUL_PEERS=$(curl http://${CONSUL}/v1/catalog/nodes | jq --arg host "$HOSTNAME" -r '.[] | select (.Node != $host) | .Address')
+done
 
 # Generate Nomad Server Config
 envsubst << EOF > /etc/nomad.d/server/config.hcl
@@ -111,7 +145,7 @@ server {
 }
 
 consul {
-  address = "${CONSUL}"
+  address = "127.0.0.1:8500"
   token = "${CONSUL_TOKEN}"
 }
 EOF
@@ -132,27 +166,8 @@ ExecStart=/usr/local/bin/nomad agent -config=/etc/nomad.d/server
 EOF
 # -- END Generate Systemd Service File --
 
-# Start Consul Service
-systemctl start consul
-systemctl status consul
-# -- END Start Nomad Service --
 
 # Start Nomad Service
 systemctl start nomad
 systemctl status nomad
 # -- END Start Nomad Service --
-
-export WEAVE_PEERS=""
-if ! $BOOTSTRAP ; then
-  while [ "$WEAVE_PEERS" == "" ]
-  do
-    sleep 1
-    WEAVE_PEERS=$(curl http://${CONSUL}/v1/catalog/nodes | jq --arg host "$HOSTNAME" -r '.[] | select (.Node != $host) | .Address')
-  done
-fi
-
-# Connect Docker Network Mesh
-weave launch $WEAVE_PEERS
-echo "DOCKER_HOST=unix:///var/run/weave/weave.sock" >> /etc/environment
-eval "$(weave env)"
-# -- END Connect Docker Network Mesh --

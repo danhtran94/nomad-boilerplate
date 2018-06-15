@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
 # Configuration
+export DO_TOKEN=5fce3866901e5b8ba58df72d7170a035d3f44ebeb9fcc100a803e7a13898b362
 export CURRENT=`pwd`
 export ETH0=$(ifconfig eth0 | grep 'inet addr' | sed -e 's/:/ /' | awk '{print $3}')
 # export ETH1=$(ifconfig eth1 | grep 'inet addr' | sed -e 's/:/ /' | awk '{print $3}')
-export CONSUL="consul.abusy.life:8500"
+export CONSUL_DOMAIN="consul.abusy.life"
+export CONSUL="$CONSUL_DOMAIN:8500"
 export CONSUL_TOKEN="7kDNG2+GDTuvfzP3tFpH2g=="
 # -- END Configuration --
 
@@ -19,11 +21,11 @@ sudo apt-get install -y docker-engine
 apt-get install -y unzip
 sudo apt-get install -y jq
 
-# cd /usr/local/bin/
-# wget https://releases.hashicorp.com/consul/1.1.0/consul_1.1.0_linux_amd64.zip
-# unzip consul_1.1.0_linux_amd64.zip
-# rm consul_1.1.0_linux_amd64.zip
-# cd $CURRENT
+cd /usr/local/bin/
+wget https://releases.hashicorp.com/consul/1.1.0/consul_1.1.0_linux_amd64.zip
+unzip consul_1.1.0_linux_amd64.zip
+rm consul_1.1.0_linux_amd64.zip
+cd $CURRENT
 
 cd /usr/local/bin/
 wget https://releases.hashicorp.com/nomad/0.8.3/nomad_0.8.3_linux_amd64.zip
@@ -41,6 +43,70 @@ chmod +x /usr/local/bin/weave
 mkdir -p /etc/{nomad.d,consul.d}/{server,client}
 mkdir -p /var/{consul,nomad}
 # -- END Create Directories --
+
+# Generate Consul Server Config
+envsubst << EOF > /etc/consul.d/client/config.hcl
+server = false
+
+datacenter = "sgp"
+
+data_dir = "/var/consul"
+
+encrypt = "${CONSUL_TOKEN}"
+
+log_level = "INFO"
+
+enable_syslog = true
+
+retry_join = ["${CONSUL_DOMAIN}"]
+
+bind_addr = "${ETH0}"
+
+advertise_addr = "${ETH0}"
+
+client_addr = "0.0.0.0"
+EOF
+# -- END Generate Nomad Server Config --
+
+# Generate Systemd Service File
+cat <<EOF > /lib/systemd/system/consul.service
+[Unit]
+Description=Consul Service
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/client
+EOF
+# -- END Generate Systemd Service File --
+
+# Start Consul Service
+systemctl start consul
+systemctl status consul
+# -- END Start Nomad Service --
+
+# Connect Docker Network Mesh
+# export WEAVE_PEERS=$(nomad node status -verbose -json  | jq --arg host "$HOSTNAME" -r '.[] | select (.Name != $host) | .Address')
+export WEAVE_PEERS=""
+while [ "$WEAVE_PEERS" == "" ]
+do
+  echo "waiting weave peers connect ..."
+  sleep 1
+  WEAVE_PEERS=$(curl http://${CONSUL}/v1/catalog/nodes | jq --arg host "$HOSTNAME" -r '.[] | select (.Node != $host) | .Address')
+done
+weave launch --ipalloc-range 10.2.0.0/16 --ipalloc-default-subnet 10.2.1.0/24 $WEAVE_PEERS
+echo "DOCKER_HOST=unix:///var/run/weave/weave.sock" >> /etc/environment
+eval "$(weave env)"
+weave expose
+# -- END Connect Docker Network Mesh --
+
+# Connect DO Block Storage
+docker plugin install --grant-all-permissions rexray/dobs DOBS_REGION=sgp1 DOBS_TOKEN=$DO_TOKEN
+# -- END Connect DO Block Storage --
+
 
 # Generate Nomad Client Config
 envsubst << EOF > /etc/nomad.d/client/config.hcl
@@ -66,7 +132,7 @@ client {
 }
 
 consul {
-  address = "${CONSUL}"
+  address = "127.0.0.1:8500"
   token = "${CONSUL_TOKEN}"
 }
 EOF
@@ -91,11 +157,3 @@ EOF
 systemctl start nomad
 systemctl status nomad
 # -- END Start Nomad Service --
-
-# Connect Docker Network Mesh
-sleep 10
-export WEAVE_PEERS=$(nomad node status -verbose -json  | jq --arg host "$HOSTNAME" -r '.[] | select (.Name != $host) | .Address')
-weave launch --no-dns --proxy --rewrite-inspect $WEAVE_PEERS
-echo "DOCKER_HOST=unix:///var/run/weave/weave.sock" >> /etc/environment
-eval "$(weave env)"
-# -- END Connect Docker Network Mesh --

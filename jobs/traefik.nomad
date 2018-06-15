@@ -13,9 +13,9 @@ job "build-infra" {
                 image = "traefik:1.6.2"
                 hostname = "traefik"
                 port_map {
-                    public = 80
-                    ui = 8080
-                    health = 8082
+                    // internal container port
+                    proxy = 80
+                    // admin = 8080
                 }
                 args = [
                     "--debug",
@@ -32,27 +32,28 @@ job "build-infra" {
                 memory = 128
                 network {
                     mbits = 1000
-                    port "ui" {
+
+                    port "proxy" {
+                        // host port
                         static = 8080
                     }
-                    // port "public" {
-                    //     static = 8000
+                    // port "admin" {
+                    //     static = 8081
                     // }
                     // port "health" {
-                    //     static = 8082
+                    //     static = 8080
                     // }
                 }
             }
 
             service {
                 name = "traefik-internal"
-                // port = "http"
                 port = 80
                 address_mode = "driver"
                 check {
-                    name     = "traefik-check"
+                    name     = "http-check"
                     type     = "http"
-                    path = "/"
+                    path = "/ping"
                     port = 8080
                     address_mode = "driver"
                     interval = "10s"
@@ -60,11 +61,28 @@ job "build-infra" {
                 }
             }
 
+            service {
+                name = "traefik"
+                port = "proxy"
+                address_mode = "host"
+                check {
+                    address_mode = "driver"
+                    // address_mode = "host"
+                    name     = "http-check"
+                    type     = "http"
+                    // port = "admin"
+                    port = 8080
+                    path = "/ping"
+                    interval = "10s"
+                    timeout  = "2s"
+                }
+            }
+
             // service {
-            //     name = "traefik-public"
-            //     port = "public"
+            //     name = "traefik-ui"
+            //     port = "ui"
             //     check {
-            //         name     = "traefik-check"
+            //         name     = "traefik-ui-check"
             //         type     = "http"
             //         path = "/"
             //         port = "ui"
@@ -72,19 +90,6 @@ job "build-infra" {
             //         timeout  = "2s"
             //     }
             // }
-
-            service {
-                name = "traefik-ui"
-                port = "ui"
-                check {
-                    name     = "traefik-ui-check"
-                    type     = "http"
-                    path = "/"
-                    port = "ui"
-                    interval = "10s"
-                    timeout  = "2s"
-                }
-            }
 
         }
     }
