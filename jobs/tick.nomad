@@ -1,4 +1,4 @@
-job "storage-manager" {
+job "monitor" {
     datacenters = ["sgp"]
 
     type = "service"
@@ -6,12 +6,12 @@ job "storage-manager" {
     group "core" {
         count = 1
 
-        task "minio" {
+        task "influxdb" {
             driver = "docker"
 
             config {
-                image = "minio/minio:latest"
-                hostname = "minio"
+                image = "influxdb"
+                hostname = "influxdb"
                 volume_driver = "rexray/dobs"
                 volumes = [
                     "minio:/data"

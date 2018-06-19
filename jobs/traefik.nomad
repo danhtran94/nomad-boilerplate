@@ -1,28 +1,30 @@
-job "build-infra" {
+job "load-balancer" {
     datacenters = ["sgp"]
 
-    type = "service"
+    type = "system"
 
-    group "loadbalancer" {
+    group "core" {
         count = 1
 
         task "traefik" {
             driver = "docker"
 
             config {
-                image = "traefik:1.6.2"
+                image = "traefik:v1.6.4"
                 hostname = "traefik"
                 port_map {
                     // internal container port
                     proxy = 80
-                    // admin = 8080
+                    // default ping, health, api port
+                    traefik = 8080
                 }
                 args = [
                     "--debug",
+                    "--ping",
+                    "--api",
                     "--accesslogsfile=/dev/stdout",
-                    "--web",
                     "--consulcatalog",
-                    "--consulcatalog.endpoint=consul.abusy.life:8500",
+                    "--consulcatalog.endpoint=188.166.187.33:8500",
                 ]
                 network_mode = "weave"
             }
@@ -31,15 +33,15 @@ job "build-infra" {
                 cpu    = 500
                 memory = 256
                 network {
-                    mbits = 512
+                    mbits = 500
 
                     port "proxy" {
                         // host port
-                        static = 8080
+                        static = 80
                     }
-                    // port "admin" {
-                    //     static = 8081
-                    // }
+                    port "traefik" {
+                        static = 5555
+                    }
                     // port "health" {
                     //     static = 8080
                     // }
@@ -47,49 +49,39 @@ job "build-infra" {
             }
 
             service {
-                name = "traefik-internal"
-                port = 80
-                address_mode = "driver"
+                tags = ["lb"]
+                name = "traefik"
+                port = "proxy"
+                address_mode = "host"
                 check {
+                    address_mode = "driver"
                     name     = "http-check"
                     type     = "http"
-                    path = "/ping"
                     port = 8080
-                    address_mode = "driver"
+                    path = "/ping"
                     interval = "10s"
                     timeout  = "2s"
                 }
             }
 
             service {
-                name = "traefik"
-                port = "proxy"
-                address_mode = "host"
+                name = "traefik-ui"
+                tags = [
+                    "traefik.tags=service",
+                    "traefik.frontend.rule=Host:traefik.abusy.life;HeadersRegexp: X-Token, SUPER113",
+                ]
+                port = 8080
+                address_mode = "driver"
                 check {
                     address_mode = "driver"
-                    // address_mode = "host"
                     name     = "http-check"
                     type     = "http"
-                    // port = "admin"
                     port = 8080
                     path = "/ping"
                     interval = "10s"
                     timeout  = "2s"
                 }
             }
-
-            // service {
-            //     name = "traefik-ui"
-            //     port = "ui"
-            //     check {
-            //         name     = "traefik-ui-check"
-            //         type     = "http"
-            //         path = "/"
-            //         port = "ui"
-            //         interval = "10s"
-            //         timeout  = "2s"
-            //     }
-            // }
 
         }
     }

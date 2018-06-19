@@ -5,19 +5,21 @@ export DO_TOKEN=5fce3866901e5b8ba58df72d7170a035d3f44ebeb9fcc100a803e7a13898b362
 export CURRENT=`pwd`
 export ETH0=$(ifconfig eth0 | grep 'inet addr' | sed -e 's/:/ /' | awk '{print $3}')
 # export ETH1=$(ifconfig eth1 | grep 'inet addr' | sed -e 's/:/ /' | awk '{print $3}')
-export CONSUL_DOMAIN="consul.abusy.life"
-export CONSUL="$CONSUL_DOMAIN:8500"
+export CONSUL_DOMAIN="consul"
+export CONSUL_BOOTSTRAP_IP="188.166.187.33"
+export CONSUL="$CONSUL_BOOTSTRAP_IP:8500"
 export CONSUL_TOKEN="7kDNG2+GDTuvfzP3tFpH2g=="
 # -- END Configuration --
 
 # Install Dependencies
-sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
-sudo apt-add-repository 'deb https://apt.dockerproject.org/repo ubuntu-xenial main'
-sudo apt-add-repository 'deb http://us.archive.ubuntu.com/ubuntu vivid main universe'
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+sudo add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
 
 sudo apt-get update
-apt-cache policy docker-engine
-sudo apt-get install -y docker-engine
+sudo apt-get install -y docker-ce
 apt-get install -y unzip
 sudo apt-get install -y jq
 
@@ -61,11 +63,19 @@ log_level = "INFO"
 
 enable_syslog = true
 
-retry_join = ["${CONSUL_DOMAIN}"]
+retry_join = ["${CONSUL_BOOTSTRAP_IP}"]
 
 bind_addr = "${ETH0}"
 
 advertise_addr = "${ETH0}"
+
+domain = "${CONSUL_DOMAIN}"
+
+# recursors = ["8.8.8.8"]
+
+# ports {
+#   dns = 53
+# }
 
 client_addr = "0.0.0.0"
 EOF
@@ -100,13 +110,14 @@ do
   sleep 1
   WEAVE_PEERS=$(curl http://${CONSUL}/v1/catalog/nodes | jq --arg host "$HOSTNAME" -r '.[] | select (.Node != $host) | .Address')
 done
-weave launch --ipalloc-range 10.2.0.0/16 --ipalloc-default-subnet 10.2.1.0/24 $WEAVE_PEERS
+# weave launch --no-dns --rewrite-inspect --ipalloc-range 10.2.0.0/16 --ipalloc-default-subnet 10.2.1.0/24 $WEAVE_PEERS
+weave launch --rewrite-inspect --ipalloc-range 10.2.0.0/16 --ipalloc-default-subnet 10.2.1.0/24 $WEAVE_PEERS
 echo "DOCKER_HOST=unix:///var/run/weave/weave.sock" >> /etc/environment
 eval "$(weave env)"
 weave expose
-
-scope launch
 # -- END Connect Docker Network Mesh --
+
+scope launch -probe-only $CONSUL_BOOTSTRAP_IP
 
 # Connect DO Block Storage
 docker plugin install --grant-all-permissions rexray/dobs DOBS_REGION=sgp1 DOBS_TOKEN=$DO_TOKEN
